@@ -381,6 +381,13 @@ class BulkOperationBuilder(object):
         write_operation = BulkWriteOperation(self, selector, is_upsert=False)
         write_operation.register_remove_op(not just_one, hint=hint)
 
+def store_operation(func):
+    @functools.wraps(func)
+    def storing_operation_wrapper(self, *args, **kwargs):
+        self._operations_store[func.__name__].append((args, kwargs))
+        return func(*args, **kwargs)
+
+    return storing_operation_wrapper
 
 class Collection(object):
 
@@ -449,15 +456,18 @@ class Collection(object):
     def codec_options(self):
         return self._codec_options
 
+    @store_operation
     def initialize_unordered_bulk_op(self, bypass_document_validation=False):
         return BulkOperationBuilder(
             self, ordered=False, bypass_document_validation=bypass_document_validation)
 
+    @store_operation
     def initialize_ordered_bulk_op(self, bypass_document_validation=False):
         return BulkOperationBuilder(
             self, ordered=True, bypass_document_validation=bypass_document_validation)
 
     if helpers.PYMONGO_VERSION < version.parse('4.0'):
+        @store_operation
         def insert(self, data, manipulate=True, check_keys=True,
                    continue_on_error=False, **kwargs):
             warnings.warn('insert is deprecated. Use insert_one or insert_many '
@@ -465,11 +475,13 @@ class Collection(object):
             validate_write_concern_params(**kwargs)
             return self._insert(data)
 
+    @store_operation
     def insert_one(self, document, bypass_document_validation=False, session=None):
         if not bypass_document_validation:
             validate_is_mutable_mapping('document', document)
         return InsertOneResult(self._insert(document, session), acknowledged=True)
 
+    @store_operation
     def insert_many(self, documents, ordered=True, bypass_document_validation=False, session=None):
         if not isinstance(documents, Iterable) or not documents:
             raise TypeError('documents must be a non-empty list')
@@ -581,6 +593,7 @@ class Collection(object):
             sub_doc = sub_doc[part]
         return True
 
+    @store_operation
     def update_one(
             self, filter, update, upsert=False, bypass_document_validation=False, collation=None,
             array_filters=None, hint=None, session=None, let=None):
@@ -592,6 +605,7 @@ class Collection(object):
                 array_filters=array_filters, let=let),
             acknowledged=True)
 
+    @store_operation
     def update_many(
             self, filter, update, upsert=False, array_filters=None,
             bypass_document_validation=False, collation=None, hint=None,
@@ -604,6 +618,7 @@ class Collection(object):
                 collation=collation, array_filters=array_filters, let=let),
             acknowledged=True)
 
+    @store_operation
     def replace_one(
             self, filter, replacement, upsert=False, bypass_document_validation=False,
             session=None, hint=None):
@@ -614,6 +629,7 @@ class Collection(object):
             acknowledged=True)
 
     if helpers.PYMONGO_VERSION < version.parse('4.0'):
+        @store_operation
         def update(self, spec, document, upsert=False, manipulate=False,
                    multi=False, check_keys=False, **kwargs):
             warnings.warn('update is deprecated. Use replace_one, update_one or '
@@ -1044,6 +1060,7 @@ class Collection(object):
                 new_doc[k] = new_v
         return new_doc, not bool(new_doc)
 
+    @store_operation
     def find(self, filter=None, projection=None, skip=0, limit=0,
              no_cursor_timeout=False, cursor_type=None, sort=None,
              allow_partial_results=False, oplog_replay=False, modifiers=None,
@@ -1299,6 +1316,7 @@ class Collection(object):
         return (document for document in list(self._store.documents)
                 if filter_applies(filter, document))
 
+    @store_operation
     def find_one(self, filter=None, *args, **kwargs):  # pylint: disable=keyword-arg-before-vararg
         # Allow calling find_one with a non-dict argument that gets used as
         # the id for the query.
@@ -1317,6 +1335,7 @@ class Collection(object):
         validate_is_mapping('filter', filter)
         return self._find_and_modify(filter, projection, sort=sort, **kwargs)
 
+    @store_operation
     def find_one_and_replace(self, filter, replacement,
                              projection=None, sort=None, upsert=False,
                              return_document=ReturnDocument.BEFORE, **kwargs):
@@ -1325,6 +1344,7 @@ class Collection(object):
         return self._find_and_modify(filter, projection, replacement, upsert,
                                      sort, return_document, **kwargs)
 
+    @store_operation
     def find_one_and_update(self, filter, update,
                             projection=None, sort=None, upsert=False,
                             return_document=ReturnDocument.BEFORE, **kwargs):
@@ -1334,6 +1354,7 @@ class Collection(object):
                                      sort, return_document, **kwargs)
 
     if helpers.PYMONGO_VERSION < version.parse('4.0'):
+        @store_operation
         def find_and_modify(self, query={}, update=None, upsert=False, sort=None,
                             full_response=False, manipulate=False, fields=None, **kwargs):
             warnings.warn('find_and_modify is deprecated, use find_one_and_delete'
@@ -1379,6 +1400,7 @@ class Collection(object):
         return old
 
     if helpers.PYMONGO_VERSION < version.parse('4.0'):
+        @store_operation
         def save(self, to_save, manipulate=True, check_keys=True, **kwargs):
             warnings.warn('save is deprecated. Use insert_one or replace_one '
                           'instead', DeprecationWarning, stacklevel=2)
@@ -1391,11 +1413,13 @@ class Collection(object):
                 {'_id': to_save['_id']}, to_save, True, manipulate, check_keys=True, **kwargs)
             return to_save.get('_id', None)
 
+    @store_operation
     def delete_one(self, filter, collation=None, hint=None, session=None):
         validate_is_mapping('filter', filter)
         return DeleteResult(
             self._delete(filter, collation=collation, hint=hint, session=session), True)
 
+    @store_operation
     def delete_many(self, filter, collation=None, hint=None, session=None):
         validate_is_mapping('filter', filter)
         return DeleteResult(
@@ -1437,12 +1461,14 @@ class Collection(object):
         }
 
     if helpers.PYMONGO_VERSION < version.parse('4.0'):
+        @store_operation
         def remove(self, spec_or_id=None, multi=True, **kwargs):
             warnings.warn('remove is deprecated. Use delete_one or delete_many '
                           'instead.', DeprecationWarning, stacklevel=2)
             validate_write_concern_params(**kwargs)
             return self._delete(spec_or_id, multi=multi)
 
+        @store_operation
         def count(self, filter=None, **kwargs):
             warnings.warn(
                 'count is deprecated. Use estimated_document_count or '
@@ -1457,6 +1483,7 @@ class Collection(object):
             spec = helpers.patch_datetime_awareness_in_document(filter)
             return len(list(self._iter_documents(spec)))
 
+    @store_operation
     def count_documents(self, filter, **kwargs):
         if kwargs.pop('collation', None):
             raise_not_implemented(
@@ -1484,6 +1511,7 @@ class Collection(object):
         count = max(doc_num - skip, 0)
         return count if limit is None else min(count, limit)
 
+    @store_operation
     def estimated_document_count(self, **kwargs):
         if kwargs.pop('session', None):
             raise ConfigurationError('estimated_document_count does not support sessions')
@@ -1495,15 +1523,18 @@ class Collection(object):
                 "BSON field 'count.%s' is an unknown field." % list(unknown_kwargs)[0])
         return self.count_documents({}, **kwargs)
 
+    @store_operation
     def drop(self, session=None):
         if session:
             raise_not_implemented('session', 'Mongomock does not handle sessions yet')
         self.database.drop_collection(self.name)
 
     if helpers.PYMONGO_VERSION < version.parse('4.0'):
+        @store_operation
         def ensure_index(self, key_or_list, cache_for=300, **kwargs):
             return self.create_index(key_or_list, cache_for, **kwargs)
 
+    @store_operation
     def create_index(self, key_or_list, cache_for=300, session=None, **kwargs):
         if session:
             raise_not_implemented('session', 'Mongomock does not handle sessions yet')
@@ -1561,6 +1592,7 @@ class Collection(object):
 
         return index_name
 
+    @store_operation
     def create_indexes(self, indexes, session=None):
         for index in indexes:
             if not isinstance(index, IndexModel):
@@ -1578,6 +1610,7 @@ class Collection(object):
             for index in indexes
         ]
 
+    @store_operation
     def drop_index(self, index_or_name, session=None):
         if session:
             raise_not_implemented('session', 'Mongomock does not handle sessions yet')
@@ -1590,12 +1623,14 @@ class Collection(object):
         except KeyError as err:
             raise OperationFailure('index not found with name [%s]' % name) from err
 
+    @store_operation
     def drop_indexes(self, session=None):
         if session:
             raise_not_implemented('session', 'Mongomock does not handle sessions yet')
         self._store.indexes = {}
 
     if helpers.PYMONGO_VERSION < version.parse('4.0'):
+        @store_operation
         def reindex(self, session=None):
             if session:
                 raise_not_implemented('session', 'Mongomock does not handle sessions yet')
@@ -1607,6 +1642,7 @@ class Collection(object):
         for name, information in self._store.indexes.items():
             yield name, information
 
+    @store_operation
     def list_indexes(self, session=None):
         if session:
             raise_not_implemented('session', 'Mongomock does not handle sessions yet')
@@ -1617,6 +1653,7 @@ class Collection(object):
                 name=name,
                 v=2)
 
+    @store_operation
     def index_information(self, session=None):
         if session:
             raise_not_implemented('session', 'Mongomock does not handle sessions yet')
@@ -1626,6 +1663,7 @@ class Collection(object):
         }
 
     if helpers.PYMONGO_VERSION < version.parse('4.0'):
+        @store_operation
         def map_reduce(self, map_func, reduce_func, out, full_response=False,
                        query=None, limit=0, session=None):
             if execjs is None:
@@ -1725,17 +1763,20 @@ class Collection(object):
                 ret_val = full_dict
             return ret_val
 
+        @store_operation
         def inline_map_reduce(self, map_func, reduce_func, full_response=False,
                               query=None, limit=0, session=None):
             return self.map_reduce(
                 map_func, reduce_func, {'inline': 1}, full_response, query, limit, session=session)
 
+    @store_operation
     def distinct(self, key, filter=None, session=None):
         if session:
             raise_not_implemented('session', 'Mongomock does not handle sessions yet')
         return self.find(filter).distinct(key)
 
     if helpers.PYMONGO_VERSION < version.parse('4.0'):
+        @store_operation
         def group(self, key, condition, initial, reduce, finalize=None):
             if helpers.PYMONGO_VERSION >= version.parse('3.6'):
                 raise OperationFailure("no such command: 'group'")
@@ -1796,10 +1837,12 @@ class Collection(object):
             ret_array = ret_array_copy
             return ret_array
 
+    @store_operation
     def aggregate(self, pipeline, session=None, **unused_kwargs):
         in_collection = [doc for doc in self.find()]
         return aggregate.process_pipeline(in_collection, self.database, pipeline, session)
 
+    @store_operation
     def with_options(
             self, codec_options=None, read_preference=None, write_concern=None, read_concern=None):
         has_changes = False
@@ -1826,11 +1869,13 @@ class Collection(object):
             read_preference=read_preference or self._read_preference,
             codec_options=codec_options or self._codec_options, _db_store=self._db_store)
 
+    @store_operation
     def rename(self, new_name, session=None, **kwargs):
         if session:
             raise_not_implemented('session', 'Mongomock does not handle sessions yet')
         return self.database.rename_collection(self.name, new_name, **kwargs)
 
+    @store_operation
     def bulk_write(self, requests, ordered=True, bypass_document_validation=False, session=None):
         if bypass_document_validation:
             raise NotImplementedError(
@@ -1846,6 +1891,7 @@ class Collection(object):
             operation._add_to_bulk(bulk)
         return BulkWriteResult(bulk.execute(), True)
 
+    @store_operation
     def find_raw_batches(
             self, filter=None, projection=None, skip=0, limit=0, no_cursor_timeout=False,
             cursor_type=None, sort=None, allow_partial_results=False,
