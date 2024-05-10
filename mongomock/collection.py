@@ -36,6 +36,7 @@ except ImportError:
 
     from mongomock.read_preferences import PRIMARY as _READ_PREFERENCE_PRIMARY
 
+from mongomock.call_history import CallHistory
 from sentinels import NOTHING
 
 
@@ -381,13 +382,15 @@ class BulkOperationBuilder(object):
         write_operation = BulkWriteOperation(self, selector, is_upsert=False)
         write_operation.register_remove_op(not just_one, hint=hint)
 
+
 def store_operation(func):
     @functools.wraps(func)
     def storing_operation_wrapper(self, *args, **kwargs):
-        self._operations_store[func.__name__].append((args, kwargs))
-        return func(*args, **kwargs)
+        self._call_history.add(func, *copy.deepcopy(args), **copy.deepcopy(kwargs))
+        return func(self, *args, **kwargs)
 
     return storing_operation_wrapper
+
 
 class Collection(object):
 
@@ -397,6 +400,7 @@ class Collection(object):
         self.database = database
         self._name = name
         self._db_store = _db_store
+        self._call_history = CallHistory()
         self._write_concern = write_concern or WriteConcern()
         if read_concern and not isinstance(read_concern, ReadConcern):
             raise TypeError('read_concern must be an instance of pymongo.read_concern.ReadConcern')
@@ -439,6 +443,10 @@ class Collection(object):
     @property
     def name(self):
         return self._name
+
+    @property
+    def mongo_mock_call_history(self):
+        return self._call_history
 
     @property
     def write_concern(self):
